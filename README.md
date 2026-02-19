@@ -8,6 +8,7 @@ you can drop into your brain with a single zip extract.
 | Plugin | Description |
 |--------|-------------|
 | [enable-google-presentation](plugins/enable-google-presentation/) | Set up Google Slides API for automatic presentation generation after audits |
+| [html-to-slides](plugins/html-to-slides/) | Convert any HTML file or URL into an editable Google Slides presentation |
 
 ## How to install a plugin
 

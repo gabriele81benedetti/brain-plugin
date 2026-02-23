@@ -32,7 +32,7 @@ from pathlib import Path
 from urllib.request import urlopen
 
 try:
-    from bs4 import BeautifulSoup
+    from bs4 import BeautifulSoup, NavigableString
 except ImportError:
     print("❌  Missing dependency: pip install beautifulsoup4")
     sys.exit(1)
@@ -49,7 +49,8 @@ CREDS_PATH = Path.home() / ".google-slides-credentials.json"
 TOKEN_PATH = Path.home() / ".google-slides-token.json"
 
 # ── Template ───────────────────────────────────────────────────────────────────
-# Same branded template as generate_slides.py — preserves master, layouts, fonts.
+# Company branded template — preserves master slides, layouts, and fonts.
+# To use your own template: pass --template "YOUR_TEMPLATE_ID" when running.
 SLIDES_TEMPLATE_ID = "1Cy0pGP-Cnp8x-hNcDdjjvZAo9ksuUxwTcSZOIdqTwxQ"
 
 # ── Design constants ───────────────────────────────────────────────────────────
@@ -89,7 +90,7 @@ def authenticate():
 
 # ── Deck builder ───────────────────────────────────────────────────────────────
 class Deck:
-    """Minimal fluent builder for Google Slides (subset of generate_slides.py Deck)."""
+    """Minimal fluent builder for Google Slides presentations via batch API."""
 
     def __init__(self, service, title, template_id=None, drive_svc=None):
         self.svc = service
@@ -226,29 +227,32 @@ class Deck:
         color = color or INK
         _AM = {"LEFT": "START", "RIGHT": "END"}
         align = _AM.get(align, align)
-        self.reqs += [
-            {"insertText": {
-                "objectId": tbl_id,
-                "cellLocation": {"rowIndex": row, "columnIndex": col},
-                "text": txt, "insertionIndex": 0,
-            }},
-            {"updateTextStyle": {
-                "objectId": tbl_id,
-                "cellLocation": {"rowIndex": row, "columnIndex": col},
-                "style": {"fontSize": {"magnitude": size, "unit": "PT"},
-                          "bold": bold,
-                          "foregroundColor": {"opaqueColor": {"rgbColor": color}}},
-                "fields": "fontSize,bold,foregroundColor",
-                "textRange": {"type": "ALL"},
-            }},
-            {"updateParagraphStyle": {
-                "objectId": tbl_id,
-                "cellLocation": {"rowIndex": row, "columnIndex": col},
-                "style": {"alignment": align},
-                "fields": "alignment",
-                "textRange": {"type": "ALL"},
-            }},
-        ]
+
+        # Only add text and styles if cell has content
+        if txt and txt.strip():
+            self.reqs += [
+                {"insertText": {
+                    "objectId": tbl_id,
+                    "cellLocation": {"rowIndex": row, "columnIndex": col},
+                    "text": txt, "insertionIndex": 0,
+                }},
+                {"updateTextStyle": {
+                    "objectId": tbl_id,
+                    "cellLocation": {"rowIndex": row, "columnIndex": col},
+                    "style": {"fontSize": {"magnitude": size, "unit": "PT"},
+                              "bold": bold,
+                              "foregroundColor": {"opaqueColor": {"rgbColor": color}}},
+                    "fields": "fontSize,bold,foregroundColor",
+                    "textRange": {"type": "ALL"},
+                }},
+                {"updateParagraphStyle": {
+                    "objectId": tbl_id,
+                    "cellLocation": {"rowIndex": row, "columnIndex": col},
+                    "style": {"alignment": align},
+                    "fields": "alignment",
+                    "textRange": {"type": "ALL"},
+                }},
+            ]
         if bg:
             self.reqs.append({"updateTableCellProperties": {
                 "objectId": tbl_id,
@@ -289,6 +293,12 @@ def clean_text(node):
 
 def node_to_text(node):
     """Recursively convert a BS4 node to plain text with minimal formatting."""
+    # Handle NavigableString (plain text nodes)
+    if isinstance(node, NavigableString):
+        text = re.sub(r"\s+", " ", str(node)).strip()
+        return text if text else ""
+
+    # Handle tags with children
     lines = []
     for child in node.children:
         if not hasattr(child, "name"):
@@ -418,8 +428,8 @@ def get_cover_info(soup):
 
 # ── Slide builders ─────────────────────────────────────────────────────────────
 
-def build_cover(deck, title, subtitle):
-    sid = deck.slide("Copertina", index=0)
+def build_cover(deck, title, subtitle, cover_layout="Copertina"):
+    sid = deck.slide(cover_layout, index=0)
     deck.flush()
     deck.text(sid, title[:120], 0.5, 1.6, 9.0, 1.4,
               size=34, bold=True, color=WHITE, align="CENTER")
@@ -429,8 +439,8 @@ def build_cover(deck, title, subtitle):
     return sid
 
 
-def build_content_slide(deck, index, title, body, subtitle=None):
-    sid = deck.slide("Titolo e testo", index=index)
+def build_content_slide(deck, index, title, body, subtitle=None, content_layout="Titolo e testo"):
+    sid = deck.slide(content_layout, index=index)
     deck.flush()
     deck.header_bar(sid, title[:100], subtitle)
     if body:
@@ -441,14 +451,14 @@ def build_content_slide(deck, index, title, body, subtitle=None):
     return sid
 
 
-def build_table_slide(deck, index, title, table_rows):
+def build_table_slide(deck, index, title, table_rows, content_layout="Titolo e testo"):
     rows = table_rows[:MAX_TABLE_ROWS]
     if not rows:
         return
     cols = max((len(r) for r in rows), default=1)
     cols = max(cols, 1)
 
-    sid = deck.slide("Titolo e testo", index=index)
+    sid = deck.slide(content_layout, index=index)
     deck.flush()
     deck.header_bar(sid, title[:100])
 
@@ -478,6 +488,10 @@ def main():
     parser.add_argument("--out",      help="Write URL to this file path")
     parser.add_argument("--template", default=SLIDES_TEMPLATE_ID,
                         help="Google Slides template ID (default: company template)")
+    parser.add_argument("--cover-layout", default="Copertina",
+                        help="Layout name for cover slide (default: 'Copertina' for Italian, use 'Title Slide' for English)")
+    parser.add_argument("--content-layout", default="Titolo e testo",
+                        help="Layout name for content slides (default: 'Titolo e testo' for Italian, use 'Title and Body' for English)")
     args = parser.parse_args()
 
     print("🔐  Authenticating…")
@@ -500,7 +514,7 @@ def main():
     deck.flush()
 
     idx = 0
-    build_cover(deck, cover_title, cover_subtitle)
+    build_cover(deck, cover_title, cover_subtitle, cover_layout=args.cover_layout)
     deck.flush()
     idx += 1
 
@@ -511,13 +525,13 @@ def main():
 
         if body:
             print(f"    [{i}/{len(sections)}] {title[:50]}")
-            build_content_slide(deck, idx, title, body)
+            build_content_slide(deck, idx, title, body, content_layout=args.content_layout)
             deck.flush()
             idx += 1
 
         for tbl in tables:
             if len(tbl) > 1:
-                build_table_slide(deck, idx, title, tbl)
+                build_table_slide(deck, idx, title, tbl, content_layout=args.content_layout)
                 deck.flush()
                 idx += 1
 

@@ -9,6 +9,7 @@ you can drop into your brain with a single zip extract.
 |--------|-------------|
 | [enable-google-presentation](plugins/enable-google-presentation/) | Set up Google Slides API for automatic presentation generation after audits |
 | [html-to-slides](plugins/html-to-slides/) | Convert any HTML file or URL into an editable Google Slides presentation |
+| [threshold-recommender](plugins/threshold-recommender/) | Interactive Shopping product bucketing report with ROAS/CPA sliders and spend-based thresholds |
 
 ## How to install a plugin
 
